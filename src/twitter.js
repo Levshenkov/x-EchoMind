@@ -15,9 +15,13 @@ import logger from './logger.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const COOKIES_PATH = path.join(__dirname, '../data/cookies.json')
 
-// Web bearer token (paired with browser session cookies — do NOT use mobile bearer)
+// Web bearer — paired with browser session cookies, used for posting/timeline
 const WEB_BEARER =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+
+// Mobile bearer — used with a guest token for anonymous public search (no cookies needed)
+const MOBILE_BEARER =
+  'AAAAAAAAAAAAAAAAAAAAAFQODgEAAAAAVHTp76lzh3GLCTQGAAAAoMkR36I%3DYIslFf9yrKWvLkasRrPYWWLPa5255nQ9s4VsVU2wOAIE5YR4Y4'
 
 // X GraphQL query IDs — rotate every few weeks, update if endpoints return 404
 const QID = {
@@ -81,6 +85,28 @@ const TWEET_FEATURES = {
 let authToken = null
 let ct0 = null
 
+// Guest token cache (for anonymous search — expires ~15 min, we refresh every 12)
+let _guestToken = null
+let _guestTokenExpiry = 0
+
+async function getGuestToken() {
+  if (_guestToken && Date.now() < _guestTokenExpiry) return _guestToken
+
+  const res = await fetch('https://api.twitter.com/1.1/guest/activate.json', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${MOBILE_BEARER}` },
+  })
+  if (!res.ok) throw new Error(`guest/activate.json returned ${res.status}`)
+
+  const data = await res.json()
+  if (!data.guest_token) throw new Error('guest/activate.json: no guest_token in response')
+
+  _guestToken = data.guest_token
+  _guestTokenExpiry = Date.now() + 12 * 60 * 1000
+  logger.info('Twitter: guest token refreshed')
+  return _guestToken
+}
+
 function buildHeaders() {
   return {
     authorization: `Bearer ${WEB_BEARER}`,
@@ -112,13 +138,15 @@ async function xFetch(url, options = {}) {
 
 /**
  * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
- * Uses X's legacy adaptive.json REST endpoint — no GraphQL query ID needed.
+ * Uses mobile bearer + guest token for anonymous read access — no session needed.
  * @param {string} query
  * @param {number} count
  * @returns {Promise<Tweet[]>}
  */
 export async function searchTweets(query, count = 20) {
   try {
+    const guestToken = await getGuestToken()
+
     const params = new URLSearchParams({
       q: query,
       count: String(Math.min(count, 100)),
@@ -126,15 +154,35 @@ export async function searchTweets(query, count = 20) {
       query_source: 'typed_query',
       include_quote_count: 'true',
       include_reply_count: '1',
-      include_ext_views: 'true',
+      include_ext_alt_text: 'true',
+      include_entities: 'true',
+      include_user_entities: 'true',
     })
 
-    const data = await xFetch(`https://twitter.com/i/api/2/search/adaptive.json?${params}`)
+    const res = await fetch(
+      `https://api.twitter.com/2/search/adaptive.json?${params}`,
+      {
+        headers: {
+          authorization: `Bearer ${MOBILE_BEARER}`,
+          'x-guest-token': guestToken,
+          'content-type': 'application/json',
+          'user-agent': 'TwitterAndroid/10.21.0-release.0',
+          'x-twitter-client-language': 'en',
+        },
+      }
+    )
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
+    }
+
+    const data = await res.json()
     const tweets = parseAdaptiveSearch(data, count)
     logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
     return tweets
   } catch (err) {
-    logger.error(`Twitter: searchTweets failed for "${query}":`, err.message)
+    logger.error(`Twitter: searchTweets failed for "${query}":`, err?.message ?? String(err))
     return []
   }
 }
@@ -187,7 +235,7 @@ export async function getUserId(screenName) {
     const data = await xFetch(url)
     return data?.data?.user?.result?.rest_id ?? null
   } catch (err) {
-    logger.error(`Twitter: getUserId failed for @${screenName}:`, err.message)
+    logger.error(`Twitter: getUserId failed for @${screenName}:`, err?.message ?? String(err))
     return null
   }
 }
@@ -228,7 +276,7 @@ export async function getAccountTweets(username, count = 20) {
     logger.info(`Twitter: fetched ${tweets.length} tweets from @${username}`)
     return tweets
   } catch (err) {
-    logger.error(`Twitter: getAccountTweets failed for @${username}:`, err.message)
+    logger.error(`Twitter: getAccountTweets failed for @${username}:`, err?.message ?? String(err))
     return []
   }
 }
@@ -251,7 +299,7 @@ export async function getTimeline(count = 20) {
     const instructions = data?.data?.home?.home_timeline_urt?.instructions ?? []
     return extractTweets(instructions)
   } catch (err) {
-    logger.error('Twitter: getTimeline failed:', err.message)
+    logger.error('Twitter: getTimeline failed:', err?.message ?? String(err))
     return []
   }
 }
