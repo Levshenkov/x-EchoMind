@@ -17,6 +17,10 @@
     "openai": "^4.77.0",
     "winston": "^3.17.0"
   },
+  "author": {
+    "name": "Denys Levshenkov",
+    "url": "https://www.linkedin.com/in/denys-levshenkov-bb20b7110/"
+  },
   "engines": {
     "node": ">=20"
   }
