@@ -10,10 +10,11 @@
     "cookies": "node src/auth/extract-cookies.js"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.3.0",
     "agent-twitter-client": "^0.0.18",
+    "dotenv": "^16.4.7",
     "node-cron": "^3.0.3",
     "openai": "^4.77.0",
-    "dotenv": "^16.4.7",
     "winston": "^3.17.0"
   },
   "engines": {

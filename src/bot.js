@@ -1,8 +1,10 @@
 /**
  * Core bot logic — the "brain" that orchestrates actions for each topic cycle.
+ * Every generated action goes through approveAction() before posting.
  */
 import { searchTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
 import { analyzeTweets, generateTweet, generateReply, generateQuoteComment } from './ai.js'
+import { approveAction } from './approver.js'
 import { hasRepliedTo, hasQuoted, markReplied, markQuoted, markPosted } from './state.js'
 import logger from './logger.js'
 
@@ -31,7 +33,7 @@ export async function runTopicCycle(topic, settings) {
       seen.add(t.id)
       return true
     })
-    .filter(t => !t.isRetweet) // skip plain retweets
+    .filter(t => !t.isRetweet)
     .sort((a, b) => engagementScore(b) - engagementScore(a))
 
   logger.info(`Bot: fetched ${allTweets.length} unique tweets for "${topic.name}"`)
@@ -43,83 +45,113 @@ export async function runTopicCycle(topic, settings) {
 
   // 2. Analyze with AI
   const analysis = await analyzeTweets(allTweets, topic.name)
-  logger.info(`Bot: analysis — sentiment: ${analysis.sentiment}, themes: ${analysis.themes.join(', ')}`)
+  logger.info(`Bot: sentiment: ${analysis.sentiment} | themes: ${analysis.themes.join(', ')}`)
+  if (analysis.summary) logger.info(`Bot: summary — ${analysis.summary}`)
 
-  // 3. Post original tweet (if enabled and we have subjects)
+  const style = topic.style ?? settings.defaultStyle
+
+  // 3. Post original tweet
   if (settings.actions?.postOriginal && topic.subjects?.length) {
     const subject = randomPick(topic.subjects)
-    const text = await generateTweet(subject, analysis.themes, topic.style ?? settings.defaultStyle, topic.avoid)
-    if (text) {
-      if (settings.dryRun) {
-        logger.info(`[DRY RUN] Would post: "${text}"`)
-      } else {
+    logger.info(`Bot: generating tweet on subject — "${subject}"`)
+    const generated = await generateTweet(subject, analysis.themes, style, topic.avoid)
+
+    if (generated) {
+      const { action, text } = await approveAction({
+        type: 'tweet',
+        text: generated,
+        topic: topic.name,
+      })
+
+      if (action === 'post') {
         try {
           const result = await postTweet(text)
           if (result?.id) markPosted(result.id)
+          logger.info('Bot: original tweet posted')
           await sleep(settings.delayBetweenActions ?? 5000)
         } catch (err) {
           logger.error('Bot: failed to post original tweet:', err.message)
         }
+      } else {
+        logger.info('Bot: original tweet skipped by user')
       }
     }
   }
 
-  // 4. Reply to best tweet (if enabled)
+  // 4. Reply to best tweet
   if (settings.actions?.reply && analysis.topEngagementTweet) {
     const target = analysis.topEngagementTweet
-    if (!hasRepliedTo(target.id)) {
-      const reply = await generateReply(target, topic.name, topic.style ?? settings.defaultStyle)
-      if (reply) {
-        if (settings.dryRun) {
-          logger.info(`[DRY RUN] Would reply to @${target.author}: "${reply}"`)
-        } else {
+
+    if (hasRepliedTo(target.id)) {
+      logger.info(`Bot: already replied to ${target.id}, skipping`)
+    } else {
+      logger.info(`Bot: generating reply to @${target.author}`)
+      const generated = await generateReply(target, topic.name, style)
+
+      if (generated) {
+        const { action, text } = await approveAction({
+          type: 'reply',
+          text: generated,
+          targetTweet: target,
+          topic: topic.name,
+        })
+
+        if (action === 'post') {
           try {
-            await replyToTweet(reply, target.id)
+            await replyToTweet(text, target.id)
             markReplied(target.id)
+            logger.info(`Bot: replied to @${target.author}`)
             await sleep(settings.delayBetweenActions ?? 5000)
           } catch (err) {
             logger.error('Bot: failed to reply:', err.message)
           }
+        } else {
+          logger.info('Bot: reply skipped by user')
         }
       }
-    } else {
-      logger.info(`Bot: already replied to ${target.id}, skipping`)
     }
   }
 
-  // 5. Quote-tweet a high-engagement tweet (if enabled)
+  // 5. Quote-tweet a high-engagement tweet
   if (settings.actions?.quoteTweet) {
-    // Pick a high-engagement tweet we haven't quoted yet
     const candidate = allTweets.find(t => !hasQuoted(t.id) && engagementScore(t) > 10)
+
     if (candidate) {
-      const comment = await generateQuoteComment(candidate, topic.name, topic.style ?? settings.defaultStyle)
-      if (comment) {
-        if (settings.dryRun) {
-          logger.info(`[DRY RUN] Would quote @${candidate.author}: "${comment}"`)
-        } else {
+      logger.info(`Bot: generating quote for @${candidate.author}'s tweet`)
+      const generated = await generateQuoteComment(candidate, topic.name, style)
+
+      if (generated) {
+        const { action, text } = await approveAction({
+          type: 'quote',
+          text: generated,
+          targetTweet: candidate,
+          topic: topic.name,
+        })
+
+        if (action === 'post') {
           try {
-            await quoteTweet(comment, candidate.id)
+            await quoteTweet(text, candidate.id)
             markQuoted(candidate.id)
+            logger.info(`Bot: quote-tweeted @${candidate.author}`)
             await sleep(settings.delayBetweenActions ?? 5000)
           } catch (err) {
             logger.error('Bot: failed to quote-tweet:', err.message)
           }
+        } else {
+          logger.info('Bot: quote-tweet skipped by user')
         }
       }
     }
   }
 
-  // 6. Like top tweets (if enabled)
+  // 6. Like top tweets (no approval needed — low risk action)
   if (settings.actions?.like) {
     const toLike = allTweets.slice(0, settings.likesPerCycle ?? 3)
     for (const tweet of toLike) {
-      if (settings.dryRun) {
-        logger.info(`[DRY RUN] Would like tweet by @${tweet.author}`)
-      } else {
-        await likeTweet(tweet.id)
-        await sleep(2000)
-      }
+      await likeTweet(tweet.id)
+      await sleep(2000)
     }
+    logger.info(`Bot: liked ${toLike.length} tweets`)
   }
 
   logger.info(`Bot: cycle complete for "${topic.name}"`)

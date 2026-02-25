@@ -7,9 +7,6 @@
   "runOnStart": true,
   "_runOnStartNote": "Run a cycle immediately when the bot starts (before the first cron tick).",
 
-  "dryRun": true,
-  "_dryRunNote": "Set to false to actually post. Keep true while testing to log-only.",
-
   "tweetsPerSearch": 25,
   "_tweetsPerSearchNote": "How many tweets to fetch per search query per topic.",
 
