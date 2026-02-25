@@ -1,10 +1,8 @@
 /**
  * AI module — analysis and generation via OpenAI gpt-4o-mini.
- * Two main responsibilities:
- *   1. analyze(tweets) → themes, insights, best tweet to engage
- *   2. generate(task)  → tweet text, reply text, quote text
  */
 import OpenAI from 'openai'
+import { toneInstruction } from './tones.js'
 import logger from './logger.js'
 
 let client = null
@@ -25,13 +23,13 @@ const MODEL = 'gpt-4o-mini'
  * Analyze a batch of tweets and return structured insights.
  * @param {object[]} tweets - Normalized tweet objects
  * @param {string} topic    - The topic/subject context
- * @returns {{ summary: string, topEngagementTweet: object|null, themes: string[], sentiment: string }}
+ * @returns {{ summary, topEngagementTweet, themes, sentiment }}
  */
 export async function analyzeTweets(tweets, topic) {
   if (!tweets.length) return { summary: 'No tweets found', topEngagementTweet: null, themes: [], sentiment: 'neutral' }
 
   const tweetList = tweets
-    .slice(0, 15) // cap to avoid token bloat
+    .slice(0, 15)
     .map((t, i) => `[${i + 1}] @${t.author} (${t.likes}❤️ ${t.retweets}🔁): "${t.text}"`)
     .join('\n')
 
@@ -74,17 +72,19 @@ Respond with valid JSON in this exact shape:
 
 /**
  * Generate an original tweet on a subject.
- * @param {string} subject     - The topic/subject to tweet about
- * @param {string[]} themes    - Current trending themes (from recent analysis)
- * @param {string} style       - Writing style from config
- * @param {string[]} avoid     - Topics/phrases to avoid
+ * @param {string}   subject  - The topic/subject to tweet about
+ * @param {string[]} themes   - Current trending themes (from recent analysis)
+ * @param {string}   style    - Base writing style from config
+ * @param {string[]} avoid    - Topics/phrases to avoid
+ * @param {string}   [tone]   - Tone override (from tones.js) — takes priority over style
  */
-export async function generateTweet(subject, themes = [], style = '', avoid = []) {
+export async function generateTweet(subject, themes = [], style = '', avoid = [], tone = null) {
   const themeContext = themes.length ? `\nTrending themes right now: ${themes.join(', ')}` : ''
-  const avoidNote = avoid.length ? `\nDo NOT mention or reference: ${avoid.join(', ')}` : ''
-  const styleNote = style ? `\nWriting style: ${style}` : ''
+  const avoidNote   = avoid.length  ? `\nDo NOT mention or reference: ${avoid.join(', ')}` : ''
+  const styleNote   = !tone && style ? `\nWriting style: ${style}` : ''
+  const toneNote    = toneInstruction(tone)
 
-  const prompt = `Write a single original tweet about: "${subject}"${themeContext}${styleNote}${avoidNote}
+  const prompt = `Write a single original tweet about: "${subject}"${themeContext}${styleNote}${toneNote}${avoidNote}
 
 Rules:
 - Max 280 characters
@@ -101,7 +101,7 @@ Rules:
       temperature: 0.85,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')
-    logger.info(`AI: generated tweet (${text.length} chars)`)
+    logger.info(`AI: generated tweet (${text.length} chars)${tone ? ` [tone: ${tone}]` : ''}`)
     return text
   } catch (err) {
     logger.error('AI: generateTweet failed:', err.message)
@@ -111,22 +111,23 @@ Rules:
 
 /**
  * Generate a reply to a tweet.
- * @param {object} tweet   - The tweet to reply to
- * @param {string} topic   - Context topic
- * @param {string} style   - Writing style
+ * @param {object} tweet  - The tweet to reply to
+ * @param {string} topic  - Context topic
+ * @param {string} style  - Base writing style
+ * @param {string} [tone] - Tone override
  */
-export async function generateReply(tweet, topic, style = '') {
-  const styleNote = style ? `\nWriting style: ${style}` : ''
+export async function generateReply(tweet, topic, style = '', tone = null) {
+  const styleNote = !tone && style ? `\nWriting style: ${style}` : ''
+  const toneNote  = toneInstruction(tone)
 
   const prompt = `You are replying to this tweet by @${tweet.author}:
 "${tweet.text}"
 
-Topic context: ${topic}${styleNote}
+Topic context: ${topic}${styleNote}${toneNote}
 
 Write a reply that:
 - Directly engages with what they said
 - Adds value, insight, or a thoughtful counterpoint
-- Feels natural and human, not corporate
 - Max 280 characters
 - No hashtags
 - Return ONLY the reply text`
@@ -138,7 +139,7 @@ Write a reply that:
       temperature: 0.8,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')
-    logger.info(`AI: generated reply (${text.length} chars)`)
+    logger.info(`AI: generated reply (${text.length} chars)${tone ? ` [tone: ${tone}]` : ''}`)
     return text
   } catch (err) {
     logger.error('AI: generateReply failed:', err.message)
@@ -150,19 +151,20 @@ Write a reply that:
  * Generate a quote-tweet comment.
  * @param {object} tweet  - The tweet to quote
  * @param {string} topic  - Context topic
- * @param {string} style  - Writing style
+ * @param {string} style  - Base writing style
+ * @param {string} [tone] - Tone override
  */
-export async function generateQuoteComment(tweet, topic, style = '') {
-  const styleNote = style ? `\nWriting style: ${style}` : ''
+export async function generateQuoteComment(tweet, topic, style = '', tone = null) {
+  const styleNote = !tone && style ? `\nWriting style: ${style}` : ''
+  const toneNote  = toneInstruction(tone)
 
   const prompt = `You are quote-tweeting this post by @${tweet.author}:
 "${tweet.text}"
 
-Topic context: ${topic}${styleNote}
+Topic context: ${topic}${styleNote}${toneNote}
 
 Write a quote-tweet comment that:
 - Adds your perspective or expands on their point
-- Can agree, disagree, or add nuance — but be thoughtful
 - Stands on its own even without reading the original
 - Max 240 characters (leave room for the quoted tweet)
 - Return ONLY the comment text`
@@ -174,7 +176,7 @@ Write a quote-tweet comment that:
       temperature: 0.8,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')
-    logger.info(`AI: generated quote comment (${text.length} chars)`)
+    logger.info(`AI: generated quote comment (${text.length} chars)${tone ? ` [tone: ${tone}]` : ''}`)
     return text
   } catch (err) {
     logger.error('AI: generateQuoteComment failed:', err.message)

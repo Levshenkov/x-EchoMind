@@ -1,10 +1,10 @@
 /**
  * Human-in-the-loop approval for all bot actions.
- * Pauses before every post/reply/quote and asks for confirmation.
- * Options: Approve → post as-is | Edit → modify text then post | Skip → discard
+ * Options: Approve | Edit | Change tone (regenerate) | Skip
  */
 import { select, input, confirm } from '@inquirer/prompts'
 import chalk from 'chalk'
+import { TONES, getTone } from './tones.js'
 import logger from './logger.js'
 
 // ── Color palette ────────────────────────────────────────────────
@@ -18,7 +18,9 @@ const c = {
   muted:   chalk.gray,
   success: chalk.bold.greenBright,
   skip:    chalk.dim.yellow,
+  regen:   chalk.bold.yellow,
   label:   chalk.bold.white,
+  tone:    chalk.bold.magentaBright,
   count: {
     ok:   chalk.green,
     warn: chalk.yellow,
@@ -33,17 +35,18 @@ const TYPE_CONFIG = {
 }
 
 /**
- * Prompt the user to approve, edit, or skip a generated action.
+ * Prompt the user to approve, edit, change tone, or skip a generated action.
  *
  * @param {object} opts
  * @param {'tweet'|'reply'|'quote'} opts.type
  * @param {string}  opts.text          - Generated text to review
  * @param {object}  [opts.targetTweet] - For reply/quote: the original tweet
  * @param {string}  opts.topic         - Topic name for context
+ * @param {string}  [opts.tone]        - Currently applied tone (if any)
  *
- * @returns {{ action: 'post'|'skip', text: string }}
+ * @returns {{ action: 'post'|'skip'|'regenerate', text: string, tone?: string }}
  */
-export async function approveAction({ type, text, targetTweet, topic }) {
+export async function approveAction({ type, text, targetTweet, topic, tone = null }) {
   // Non-interactive mode — auto-skip to avoid hanging
   if (!process.stdin.isTTY) {
     logger.warn('Approver: non-interactive mode — skipping action (no TTY)')
@@ -53,7 +56,7 @@ export async function approveAction({ type, text, targetTweet, topic }) {
   const cfg = TYPE_CONFIG[type] ?? TYPE_CONFIG.tweet
 
   printDivider()
-  printHeader(cfg, targetTweet, topic)
+  printHeader(cfg, targetTweet, topic, tone)
 
   if (targetTweet) {
     console.log()
@@ -71,17 +74,20 @@ export async function approveAction({ type, text, targetTweet, topic }) {
   const choice = await select({
     message: chalk.bold('What do you want to do?'),
     choices: [
-      { name: chalk.greenBright('✅  Approve') + chalk.dim(' — post as-is'),         value: 'approve' },
-      { name: chalk.yellow('✏️   Edit')    + chalk.dim(' — modify before posting'),   value: 'edit'    },
-      { name: chalk.dim('⏭️   Skip')      + chalk.dim(' — discard this action'),      value: 'skip'    },
+      { name: chalk.greenBright('✅  Approve')      + chalk.dim(' — post as-is'),                        value: 'approve' },
+      { name: chalk.yellow('✏️   Edit')              + chalk.dim(' — modify before posting'),              value: 'edit'    },
+      { name: chalk.magentaBright('🎭  Change tone') + chalk.dim(' — regenerate with a different style'), value: 'tone'    },
+      { name: chalk.dim('⏭️   Skip')                + chalk.dim(' — discard this action'),                value: 'skip'    },
     ],
   })
 
+  // ── Skip ──────────────────────────────────────────────────────
   if (choice === 'skip') {
     console.log(c.skip('  ⏭  Skipped.\n'))
     return { action: 'skip', text }
   }
 
+  // ── Edit ──────────────────────────────────────────────────────
   if (choice === 'edit') {
     const edited = await input({
       message: chalk.yellow('Edit the text') + chalk.dim(' (max 280 chars):'),
@@ -94,15 +100,11 @@ export async function approveAction({ type, text, targetTweet, topic }) {
     })
 
     console.log()
-    console.log(c.label(`  Final text:`))
+    console.log(c.label('  Final text:'))
     printContentBox(edited, cfg.color)
     printCharCount(edited.length)
 
-    const ok = await confirm({
-      message: chalk.bold('Post this?'),
-      default: true,
-    })
-
+    const ok = await confirm({ message: chalk.bold('Post this?'), default: true })
     if (!ok) {
       console.log(c.skip('  ⏭  Skipped.\n'))
       return { action: 'skip', text: edited }
@@ -112,6 +114,23 @@ export async function approveAction({ type, text, targetTweet, topic }) {
     return { action: 'post', text: edited }
   }
 
+  // ── Change tone ───────────────────────────────────────────────
+  if (choice === 'tone') {
+    const selectedTone = await select({
+      message: chalk.magentaBright('🎭  Pick a tone:'),
+      choices: TONES.map(t => ({
+        name: `${t.icon}  ${chalk.bold(t.label)}  ${chalk.dim(t.instruction.slice(0, 55) + '…')}`,
+        value: t.value,
+        disabled: t.value === tone ? chalk.dim('← current') : false,
+      })),
+    })
+
+    const picked = getTone(selectedTone)
+    console.log(c.regen(`\n  🔄  Regenerating as ${picked.icon} ${picked.label}…\n`))
+    return { action: 'regenerate', text, tone: selectedTone }
+  }
+
+  // ── Approve ───────────────────────────────────────────────────
   console.log(c.success('  ✅  Approved.\n'))
   return { action: 'post', text }
 }
@@ -122,18 +141,17 @@ function printDivider() {
   console.log(c.border('─'.repeat(62)))
 }
 
-function printHeader(cfg, targetTweet, topic) {
-  const topicTag   = chalk.dim(`topic: "${topic}"`)
-  const authorTag  = targetTweet ? chalk.dim(` → @${targetTweet.author}`) : ''
-  const headerText = `${cfg.icon}  ${cfg.color(cfg.label)}${authorTag}  ${topicTag}`
-  console.log(`\n  ${headerText}`)
+function printHeader(cfg, targetTweet, topic, tone) {
+  const topicTag  = chalk.dim(`topic: "${topic}"`)
+  const authorTag = targetTweet ? chalk.dim(` → @${targetTweet.author}`) : ''
+  const toneTag   = tone ? '  ' + c.tone(`[${getTone(tone)?.icon ?? ''} ${tone}]`) : ''
+  console.log(`\n  ${cfg.icon}  ${cfg.color(cfg.label)}${authorTag}  ${topicTag}${toneTag}`)
 }
 
 function printContentBox(text, colorFn) {
-  const WIDTH   = 56
-  const lines   = []
+  const WIDTH = 56
+  const lines = []
 
-  // Word-wrap at WIDTH chars
   const words = text.split(' ')
   let current = ''
   for (const word of words) {
@@ -146,9 +164,9 @@ function printContentBox(text, colorFn) {
   }
   if (current) lines.push(current)
 
-  const border  = c.border('┌' + '─'.repeat(WIDTH + 2) + '┐')
-  const bottom  = c.border('└' + '─'.repeat(WIDTH + 2) + '┘')
-  const body    = lines
+  const border = c.border('┌' + '─'.repeat(WIDTH + 2) + '┐')
+  const bottom = c.border('└' + '─'.repeat(WIDTH + 2) + '┘')
+  const body   = lines
     .map(l => c.border('│') + ' ' + colorFn(l.padEnd(WIDTH)) + ' ' + c.border('│'))
     .join('\n  ')
 
@@ -158,18 +176,18 @@ function printContentBox(text, colorFn) {
 }
 
 function printCharCount(len) {
-  const max    = 280
-  const pct    = len / max
-  const bar    = buildBar(pct, 30)
-  const label  = pct < 0.85 ? c.count.ok(`${len}/${max}`)
-               : pct < 1.0  ? c.count.warn(`${len}/${max}`)
-               :               c.count.over(`${len}/${max} OVER LIMIT`)
+  const max   = 280
+  const pct   = len / max
+  const bar   = buildBar(pct, 30)
+  const label = pct < 0.85 ? c.count.ok(`${len}/${max}`)
+              : pct < 1.0  ? c.count.warn(`${len}/${max}`)
+              :               c.count.over(`${len}/${max} OVER LIMIT`)
 
   console.log(`  ${c.dim('chars:')} ${label}  ${c.dim(bar)}`)
 }
 
 function buildBar(pct, width) {
-  const filled  = Math.round(Math.min(pct, 1) * width)
-  const color   = pct < 0.85 ? chalk.green : pct < 1 ? chalk.yellow : chalk.red
+  const filled = Math.round(Math.min(pct, 1) * width)
+  const color  = pct < 0.85 ? chalk.green : pct < 1 ? chalk.yellow : chalk.red
   return '[' + color('█'.repeat(filled)) + chalk.dim('░'.repeat(width - filled)) + ']'
 }
