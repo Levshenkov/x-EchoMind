@@ -3,7 +3,7 @@
  * Every generated action goes through approveAction().
  * If the user picks "Change tone", we regenerate and show again.
  */
-import { getAccountTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
+import { searchTweets, getAccountTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
 import { analyzeTweets, generateTweet, generateReply, generateQuoteComment } from './ai.js'
 import { approveAction } from './approver.js'
 import { hasRepliedTo, hasQuoted, markReplied, markQuoted, markPosted } from './state.js'
@@ -12,13 +12,19 @@ import logger from './logger.js'
 export async function runTopicCycle(topic, settings) {
   logger.info(`Bot: starting cycle for topic "${topic.name}"`)
 
-  // 1. Fetch top tweets from curated accounts
-  const accounts = topic.accounts ?? []
+  // 1. Fetch top tweets — prefer searchQueries (keyword search), fall back to accounts
   let allTweets = []
 
-  for (const account of accounts) {
-    const tweets = await getAccountTweets(account, settings.tweetsPerSearch ?? 20)
-    allTweets.push(...tweets)
+  if (topic.searchQueries?.length) {
+    for (const query of topic.searchQueries) {
+      const tweets = await searchTweets(query, settings.tweetsPerSearch ?? 20)
+      allTweets.push(...tweets)
+    }
+  } else {
+    for (const account of topic.accounts ?? []) {
+      const tweets = await getAccountTweets(account, settings.tweetsPerSearch ?? 20)
+      allTweets.push(...tweets)
+    }
   }
 
   const seen = new Set()
@@ -142,6 +148,26 @@ export async function runTopicCycle(topic, settings) {
   }
 
   logger.info(`Bot: cycle complete for "${topic.name}"`)
+}
+
+/**
+ * Run one interactive cycle for a user-supplied search query.
+ * Searches for top tweets, generates a reply to the most popular one,
+ * and generates an original tweet — both go through the approval loop.
+ */
+export async function runSearchCycle(query, settings) {
+  const topic = {
+    name: query,
+    searchQueries: [query],
+    subjects: [
+      `My perspective on ${query}`,
+      `What everyone is missing about ${query}`,
+      `The real story behind ${query}`,
+    ],
+    style: settings.defaultStyle ?? 'Thoughtful, human, slightly opinionated. No buzzwords.',
+    avoid: [],
+  }
+  return runTopicCycle(topic, settings)
 }
 
 function engagementScore(t) {

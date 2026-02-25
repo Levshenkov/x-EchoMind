@@ -110,6 +110,35 @@ async function xFetch(url, options = {}) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
+ * Uses X's legacy adaptive.json REST endpoint — no GraphQL query ID needed.
+ * @param {string} query
+ * @param {number} count
+ * @returns {Promise<Tweet[]>}
+ */
+export async function searchTweets(query, count = 20) {
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      count: String(Math.min(count, 100)),
+      tweet_mode: 'extended',
+      query_source: 'typed_query',
+      include_quote_count: 'true',
+      include_reply_count: '1',
+      include_ext_views: 'true',
+    })
+
+    const data = await xFetch(`https://twitter.com/i/api/2/search/adaptive.json?${params}`)
+    const tweets = parseAdaptiveSearch(data, count)
+    logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
+    return tweets
+  } catch (err) {
+    logger.error(`Twitter: searchTweets failed for "${query}":`, err.message)
+    return []
+  }
+}
+
 export async function initTwitter() {
   if (!fs.existsSync(COOKIES_PATH)) {
     throw new Error('No cookies found. Run: npm run setup')
@@ -333,6 +362,38 @@ export async function likeTweet(tweetId) {
 }
 
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Parse adaptive.json response (legacy REST search format).
+ * globalObjects.tweets is a flat map of id → tweet, globalObjects.users is id → user.
+ */
+function parseAdaptiveSearch(data, limit) {
+  const tweetMap = data?.globalObjects?.tweets ?? {}
+  const userMap = data?.globalObjects?.users ?? {}
+
+  return Object.entries(tweetMap)
+    .map(([id, t]) => {
+      const user = userMap[t.user_id_str] ?? {}
+      return {
+        id: t.id_str ?? id,
+        text: t.full_text ?? t.text ?? '',
+        author: user.screen_name ?? 'unknown',
+        authorName: user.name ?? '',
+        likes: t.favorite_count ?? 0,
+        retweets: t.retweet_count ?? 0,
+        replies: t.reply_count ?? 0,
+        views: parseInt(t.ext?.views?.count ?? '0', 10),
+        createdAt: t.created_at ? new Date(t.created_at) : null,
+        url: `https://x.com/${user.screen_name}/status/${t.id_str ?? id}`,
+        isReply: !!t.in_reply_to_status_id_str,
+        isRetweet: !!t.retweeted_status_id_str,
+        hashtags: t.entities?.hashtags?.map(h => h.text) ?? [],
+        mentions: t.entities?.user_mentions?.map(m => m.screen_name) ?? [],
+      }
+    })
+    .filter(t => !t.isRetweet)
+    .slice(0, limit)
+}
 
 function extractTweets(instructions, fallbackUsername) {
   const tweets = []
