@@ -3,7 +3,7 @@
  * Every generated action goes through approveAction().
  * If the user picks "Change tone", we regenerate and show again.
  */
-import { searchTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
+import { getAccountTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
 import { analyzeTweets, generateTweet, generateReply, generateQuoteComment } from './ai.js'
 import { approveAction } from './approver.js'
 import { hasRepliedTo, hasQuoted, markReplied, markQuoted, markPosted } from './state.js'
@@ -12,12 +12,12 @@ import logger from './logger.js'
 export async function runTopicCycle(topic, settings) {
   logger.info(`Bot: starting cycle for topic "${topic.name}"`)
 
-  // 1. Fetch top tweets
-  const queries = topic.searchQueries ?? [topic.name]
+  // 1. Fetch top tweets from curated accounts
+  const accounts = topic.accounts ?? []
   let allTweets = []
 
-  for (const query of queries) {
-    const tweets = await searchTweets(query, settings.tweetsPerSearch ?? 20, 'top')
+  for (const account of accounts) {
+    const tweets = await getAccountTweets(account, settings.tweetsPerSearch ?? 20)
     allTweets.push(...tweets)
   }
 
@@ -124,7 +124,7 @@ export async function runTopicCycle(topic, settings) {
 
         if (result.action === 'post') {
           try {
-            await quoteTweet(result.text, candidate.id)
+            await quoteTweet(result.text, candidate.id, candidate.author)
             markQuoted(candidate.id)
             logger.info(`Bot: quote-tweeted @${candidate.author}`)
             await sleep(settings.delayBetweenActions ?? 5000)

@@ -2,7 +2,7 @@
   {
     "name": "AI and machine learning",
     "enabled": true,
-    "searchQueries": ["#AI", "#MachineLearning", "artificial intelligence 2026", "#LLM"],
+    "accounts": ["karpathy", "sama", "ylecun", "AnthropicAI", "GoogleDeepMind", "GaryMarcus", "emollick", "DrJimFan"],
     "subjects": [
       "The biggest misconception people have about AI right now",
       "What most people miss about the current AI revolution",
@@ -15,7 +15,7 @@
   {
     "name": "Software engineering",
     "enabled": true,
-    "searchQueries": ["#SoftwareEngineering", "#coding", "#programming", "developer productivity"],
+    "accounts": ["dhh", "kelseyhightower", "martinfowler", "jessitron", "GeePaw", "sarahmei", "unclebobmartin"],
     "subjects": [
       "What makes a senior engineer different from a junior one",
       "The most underrated skill in software development",
@@ -28,7 +28,7 @@
   {
     "name": "Tech startups",
     "enabled": false,
-    "searchQueries": ["#startups", "#VC", "venture capital 2026", "#founders"],
+    "accounts": ["paulg", "naval", "Jason", "andrewchen", "benedictevans", "stratechery"],
     "subjects": [
       "What VCs don't tell you about fundraising",
       "The startup advice that's actually wrong",
