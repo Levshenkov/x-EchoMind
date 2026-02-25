@@ -1,0 +1,22 @@
+{
+  "name": "x-echomind",
+  "version": "1.0.0",
+  "description": "AI-powered X bot that analyzes top tweets and generates contextual content",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "cookies": "node src/auth/extract-cookies.js"
+  },
+  "dependencies": {
+    "agent-twitter-client": "^0.0.18",
+    "node-cron": "^3.0.3",
+    "openai": "^4.77.0",
+    "dotenv": "^16.4.7",
+    "winston": "^3.17.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

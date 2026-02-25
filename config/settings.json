@@ -1,0 +1,34 @@
+{
+  "_comment": "Bot-wide settings. Edit topics.json to configure per-topic behavior.",
+
+  "schedule": "0 */3 * * *",
+  "_scheduleNote": "Cron expression — runs every 3 hours. See https://crontab.guru for help.",
+
+  "runOnStart": true,
+  "_runOnStartNote": "Run a cycle immediately when the bot starts (before the first cron tick).",
+
+  "dryRun": true,
+  "_dryRunNote": "Set to false to actually post. Keep true while testing to log-only.",
+
+  "tweetsPerSearch": 25,
+  "_tweetsPerSearchNote": "How many tweets to fetch per search query per topic.",
+
+  "delayBetweenActions": 8000,
+  "_delayBetweenActionsNote": "Milliseconds to wait between actions (reply, quote, post) within one cycle.",
+
+  "delayBetweenTopics": 20000,
+  "_delayBetweenTopicsNote": "Milliseconds to wait between processing different topics.",
+
+  "defaultStyle": "Thoughtful, human, slightly opinionated. No buzzwords. No corporate speak.",
+
+  "actions": {
+    "postOriginal": true,
+    "reply": true,
+    "quoteTweet": true,
+    "like": true
+  },
+  "_actionsNote": "Toggle each action type on/off.",
+
+  "likesPerCycle": 3,
+  "_likesPerCycleNote": "Max tweets to like per topic cycle."
+}

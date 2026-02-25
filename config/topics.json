@@ -1,0 +1,40 @@
+[
+  {
+    "name": "AI and machine learning",
+    "enabled": true,
+    "searchQueries": ["#AI", "#MachineLearning", "artificial intelligence 2026", "#LLM"],
+    "subjects": [
+      "The biggest misconception people have about AI right now",
+      "What most people miss about the current AI revolution",
+      "Why AI safety matters more than AI capabilities in 2026",
+      "The difference between AI hype and AI reality"
+    ],
+    "style": "Thoughtful, slightly contrarian, backed by reasoning. Confident but not arrogant.",
+    "avoid": ["crypto", "blockchain", "NFT"]
+  },
+  {
+    "name": "Software engineering",
+    "enabled": true,
+    "searchQueries": ["#SoftwareEngineering", "#coding", "#programming", "developer productivity"],
+    "subjects": [
+      "What makes a senior engineer different from a junior one",
+      "The most underrated skill in software development",
+      "Why most software projects fail (and how to prevent it)",
+      "What I wish I knew earlier about writing clean code"
+    ],
+    "style": "Practical, opinionated, from a seasoned engineer's perspective. Direct and no-fluff.",
+    "avoid": []
+  },
+  {
+    "name": "Tech startups",
+    "enabled": false,
+    "searchQueries": ["#startups", "#VC", "venture capital 2026", "#founders"],
+    "subjects": [
+      "What VCs don't tell you about fundraising",
+      "The startup advice that's actually wrong",
+      "Why most startup founders focus on the wrong metrics"
+    ],
+    "style": "Candid, insider perspective. Challenges conventional startup wisdom.",
+    "avoid": ["specific company names", "politics"]
+  }
+]
