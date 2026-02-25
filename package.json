@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "cookies": "node src/auth/extract-cookies.js"
+    "setup": "node src/auth/setup-cookies.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.3.0",

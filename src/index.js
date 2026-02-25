@@ -75,8 +75,12 @@ async function main() {
   try {
     await initTwitter()
   } catch (err) {
-    logger.error('Failed to authenticate with Twitter:', err.message)
-    logger.error('Check your TWITTER_USERNAME / TWITTER_PASSWORD in .env')
+    const msg = err.message ?? err.toString()
+    logger.error('Failed to authenticate with Twitter:', msg)
+    if (msg.includes('does not exist') || msg.includes('code":34')) {
+      logger.error('Twitter blocked the login flow. Run: npm run setup')
+      logger.error('This extracts your browser cookies to bypass the restriction.')
+    }
     process.exit(1)
   }
 
