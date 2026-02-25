@@ -1,0 +1,237 @@
+<div align="center">
+
+# ✦ x-EchoMind
+
+**AI-powered X (Twitter) bot with human-in-the-loop approval**
+
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![OpenAI](https://img.shields.io/badge/OpenAI-gpt--4o--mini-412991?logo=openai&logoColor=white)](https://platform.openai.com)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Author](https://img.shields.io/badge/author-Denys%20Levshenkov-0077B5?logo=linkedin&logoColor=white)](https://www.linkedin.com/in/denys-levshenkov-bb20b7110/)
+
+</div>
+
+---
+
+## What it does
+
+x-EchoMind monitors top tweets on topics you define, analyzes them with AI, and generates contextual content — but **never posts anything without your explicit approval**.
+
+| Feature | Description |
+|---|---|
+| 🔍 **Analyze** | Fetches top tweets on your topics, extracts themes and sentiment |
+| 📝 **Post original tweets** | Generates new tweets based on your defined subjects |
+| 💬 **Reply** | Crafts replies to the most engaging tweet per topic |
+| 🔁 **Quote-tweet** | Adds commentary to high-engagement posts |
+| ❤️ **Like** | Auto-likes top tweets (no approval needed) |
+| ✅ **Approval gate** | Every action is shown to you before posting — approve, edit, or skip |
+
+---
+
+## How the approval flow works
+
+```
+────────────────────────────────────────────────────────────
+  📝  NEW TWEET  topic: "AI and machine learning"
+
+  Generated tweet:
+  ┌──────────────────────────────────────────────────────┐
+  │ Most AI "breakthroughs" are just scale + better     │
+  │ data. The hard problem — reasoning under            │
+  │ uncertainty — is still largely unsolved.            │
+  └──────────────────────────────────────────────────────┘
+  chars: 148/280  [████████░░░░░░░░░░░░░░░░░░░░░░]
+────────────────────────────────────────────────────────────
+? What do you want to do?
+❯ ✅  Approve — post as-is
+  ✏️   Edit — modify before posting
+  ⏭️   Skip — discard this action
+```
+
+- **Approve** → posts immediately
+- **Edit** → pre-fills the text for you to modify, then confirms before posting
+- **Skip** → discards, moves to the next action
+
+---
+
+## Setup
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/your-username/x-EchoMind.git
+cd x-EchoMind
+npm install
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in `.env`:
+
+```env
+TWITTER_USERNAME=your_x_username
+TWITTER_PASSWORD=your_x_password
+TWITTER_EMAIL=your_x_email@example.com
+
+OPENAI_API_KEY=sk-...
+```
+
+> **Twitter API key not required.** The bot authenticates as your account using session cookies (via [`agent-twitter-client`](https://www.npmjs.com/package/agent-twitter-client)). On first run, cookies are saved to `data/cookies.json` and reused automatically.
+
+### 3. Configure your topics
+
+Edit [`config/topics.json`](config/topics.json) to define what you want to tweet about:
+
+```json
+[
+  {
+    "name": "AI and machine learning",
+    "enabled": true,
+    "searchQueries": ["#AI", "#MachineLearning", "artificial intelligence"],
+    "subjects": [
+      "The biggest misconception people have about AI right now",
+      "What most people miss about the current AI revolution"
+    ],
+    "style": "Thoughtful, slightly contrarian, backed by reasoning.",
+    "avoid": ["crypto", "NFT"]
+  }
+]
+```
+
+| Field | Description |
+|---|---|
+| `name` | Display name for the topic |
+| `enabled` | Set to `false` to pause a topic without deleting it |
+| `searchQueries` | Array of search terms / hashtags to fetch tweets from |
+| `subjects` | Pool of subjects for original tweet generation (one picked randomly per cycle) |
+| `style` | Writing style instruction passed to the AI |
+| `avoid` | Topics/words the AI should never mention |
+
+### 4. Configure bot behavior
+
+Edit [`config/settings.json`](config/settings.json):
+
+```json
+{
+  "schedule": "0 */3 * * *",
+  "runOnStart": true,
+  "tweetsPerSearch": 25,
+  "delayBetweenActions": 8000,
+  "delayBetweenTopics": 20000,
+  "defaultStyle": "Thoughtful, human, slightly opinionated.",
+  "actions": {
+    "postOriginal": true,
+    "reply": true,
+    "quoteTweet": true,
+    "like": true
+  },
+  "likesPerCycle": 3
+}
+```
+
+| Setting | Description |
+|---|---|
+| `schedule` | Cron expression for how often cycles run ([crontab.guru](https://crontab.guru)) |
+| `runOnStart` | Run a cycle immediately on startup |
+| `tweetsPerSearch` | How many tweets to fetch per search query |
+| `delayBetweenActions` | ms to wait between actions within one cycle (rate limit safety) |
+| `actions.*` | Toggle each action type on/off individually |
+
+### 5. Run
+
+```bash
+npm start
+```
+
+Or with auto-restart on file changes (dev mode):
+
+```bash
+npm run dev
+```
+
+---
+
+## Project structure
+
+```
+x-EchoMind/
+├── src/
+│   ├── index.js       # Entry point — startup banner, auth, scheduler
+│   ├── twitter.js     # Twitter client (search, post, reply, quote, like)
+│   ├── ai.js          # OpenAI — analyze tweets, generate content
+│   ├── bot.js         # Per-topic cycle logic
+│   ├── approver.js    # Interactive terminal approval UI
+│   ├── scheduler.js   # Cron-based scheduling
+│   ├── state.js       # Persistent state (prevents duplicate actions)
+│   └── logger.js      # Winston logger (console + rolling file)
+├── config/
+│   ├── topics.json    # Your topics, queries, subjects, style
+│   └── settings.json  # Schedule, actions, timing
+├── data/              # Runtime data (gitignored)
+│   ├── cookies.json   # Saved Twitter session
+│   ├── state.json     # IDs of tweets already replied/quoted
+│   └── echomind.log   # Log file
+└── .env               # Your credentials (gitignored)
+```
+
+---
+
+## How it works internally
+
+```
+[Cron tick]
+    │
+    ▼
+For each topic:
+    │
+    ├─ searchTweets() ──► fetch top tweets by search query
+    │
+    ├─ analyzeTweets() ─► AI identifies themes, sentiment,
+    │                      and the most engaging tweet
+    │
+    ├─ generateTweet() ──► AI writes original tweet on a subject
+    │       └─ approveAction() ─► YOU: approve / edit / skip ─► postTweet()
+    │
+    ├─ generateReply() ──► AI writes reply to the top tweet
+    │       └─ approveAction() ─► YOU: approve / edit / skip ─► replyToTweet()
+    │
+    ├─ generateQuote() ──► AI writes quote-tweet comment
+    │       └─ approveAction() ─► YOU: approve / edit / skip ─► quoteTweet()
+    │
+    └─ likeTweet() ──────► likes top N tweets (auto, no approval)
+```
+
+State is persisted to `data/state.json` so already-replied tweet IDs are remembered across restarts.
+
+---
+
+## Tech stack
+
+| Library | Purpose |
+|---|---|
+| [`agent-twitter-client`](https://www.npmjs.com/package/agent-twitter-client) | Cookie-based Twitter scraper — read & write without API keys |
+| [`openai`](https://www.npmjs.com/package/openai) | GPT-4o-mini for analysis and content generation |
+| [`@inquirer/prompts`](https://www.npmjs.com/package/@inquirer/prompts) | Interactive terminal prompts for the approval UI |
+| [`chalk`](https://www.npmjs.com/package/chalk) | Terminal colors and styling |
+| [`node-cron`](https://www.npmjs.com/package/node-cron) | Cron-based scheduling |
+| [`winston`](https://www.npmjs.com/package/winston) | Structured logging to console and file |
+| [`dotenv`](https://www.npmjs.com/package/dotenv) | `.env` file loading |
+
+---
+
+## Notes
+
+- **Rate limits:** The bot adds deliberate delays between actions (`delayBetweenActions`, `delayBetweenTopics`) to avoid triggering X's rate limiter.
+- **Duplicate prevention:** `data/state.json` tracks every tweet ID you've replied to or quoted — you'll never double-engage with the same tweet.
+- **Non-interactive mode:** If you run the bot without a TTY (e.g. piped output), all actions are auto-skipped to prevent hanging.
+- **Cookies expiry:** If your session cookie expires, the bot will re-login automatically using the credentials in `.env`.
+
+---
+
+## Author
+
+**Denys Levshenkov** — [LinkedIn](https://www.linkedin.com/in/denys-levshenkov-bb20b7110/)
