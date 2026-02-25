@@ -1,6 +1,7 @@
 /**
- * Twitter client wrapper around agent-twitter-client.
- * Uses cookie-based auth so no API key is needed.
+ * X (Twitter) client wrapper around agent-twitter-client.
+ * Auth is cookie-only — X has blocked all other login flows.
+ * Run "npm run setup" to extract cookies from your browser.
  */
 import { Scraper, SearchMode } from 'agent-twitter-client'
 import fs from 'fs'
@@ -13,44 +14,19 @@ const COOKIES_PATH = path.join(__dirname, '../data/cookies.json')
 
 let scraper = null
 
-/**
- * Initialize and authenticate the Twitter scraper.
- * Tries cookies first, falls back to username/password login.
- */
 export async function initTwitter() {
   scraper = new Scraper()
 
-  // Try cookie auth first (most reliable)
-  if (fs.existsSync(COOKIES_PATH)) {
-    try {
-      const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'))
-      await scraper.setCookies(cookies)
-      const loggedIn = await scraper.isLoggedIn()
-      if (loggedIn) {
-        logger.info('Twitter: authenticated via saved cookies')
-        return scraper
-      }
-      logger.warn('Twitter: saved cookies expired, falling back to login')
-    } catch (err) {
-      logger.warn('Twitter: failed to load cookies:', err.message)
-    }
+  if (!fs.existsSync(COOKIES_PATH)) {
+    throw new Error('No cookies found. Run: npm run setup')
   }
 
-  // Login with credentials
-  const { TWITTER_USERNAME, TWITTER_PASSWORD, TWITTER_EMAIL } = process.env
-  if (!TWITTER_USERNAME || !TWITTER_PASSWORD) {
-    throw new Error('Missing TWITTER_USERNAME or TWITTER_PASSWORD in .env')
-  }
-
-  logger.info(`Twitter: logging in as @${TWITTER_USERNAME}`)
-  await scraper.login(TWITTER_USERNAME, TWITTER_PASSWORD, TWITTER_EMAIL)
-
-  // Save cookies for next run
-  const cookies = await scraper.getCookies()
-  fs.mkdirSync(path.dirname(COOKIES_PATH), { recursive: true })
-  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2))
-  logger.info('Twitter: cookies saved to data/cookies.json')
-
+  const raw = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'))
+  // The library uses https://twitter.com internally and manually injects the Cookie
+  // header into every request — so Domain=.twitter.com covers all X API endpoints.
+  const cookies = raw.map(c => `${c.name}=${c.value}; Domain=.twitter.com; Path=/; Secure`)
+  await scraper.setCookies(cookies)
+  logger.info('Twitter: cookies loaded')
   return scraper
 }
 

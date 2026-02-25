@@ -97,23 +97,35 @@ npm install
 
 ### 2. Configure environment
 
-```bash
-cp .env.example .env
-```
-
-Fill in `.env`:
+Create a `.env` file:
 
 ```env
-TWITTER_USERNAME=your_x_username
-TWITTER_PASSWORD=your_x_password
-TWITTER_EMAIL=your_x_email@example.com
-
 OPENAI_API_KEY=sk-...
 ```
 
-> **Twitter API key not required.** The bot authenticates as your account using session cookies (via [`agent-twitter-client`](https://www.npmjs.com/package/agent-twitter-client)). On first run, cookies are saved to `data/cookies.json` and reused automatically.
+That's the only key needed. X authentication uses browser cookies — no X API key, no username/password.
 
-### 3. Configure your topics
+### 3. Extract your X session cookies
+
+X has blocked all password-based login flows for bots. The only way to authenticate is with session cookies from your browser:
+
+```bash
+npm run setup
+```
+
+This walks you through copying two cookies from x.com DevTools and saves them to `data/cookies.json`.
+
+**How to get the cookies:**
+
+1. Open [https://x.com](https://x.com) and log in
+2. Press **F12** → **Application** → **Cookies** → **https://x.com**
+3. Copy the value of `auth_token`
+4. Copy the value of `ct0`
+5. Paste each when prompted by `npm run setup`
+
+> Cookies are saved to `data/cookies.json` (gitignored). If they expire, run `npm run setup` again.
+
+### 4. Configure your topics (optional)
 
 Edit [`config/topics.json`](config/topics.json) to define what you want to tweet about:
 
@@ -142,7 +154,7 @@ Edit [`config/topics.json`](config/topics.json) to define what you want to tweet
 | `style` | Writing style instruction passed to the AI |
 | `avoid` | Topics/words the AI should never mention |
 
-### 4. Configure bot behavior
+### 5. Configure bot behavior
 
 Edit [`config/settings.json`](config/settings.json):
 
@@ -172,7 +184,7 @@ Edit [`config/settings.json`](config/settings.json):
 | `delayBetweenActions` | ms to wait between actions within one cycle (rate limit safety) |
 | `actions.*` | Toggle each action type on/off individually |
 
-### 5. Run
+### 6. Run
 
 ```bash
 npm start

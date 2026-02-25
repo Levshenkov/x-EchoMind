@@ -71,16 +71,12 @@ async function main() {
   // Load persisted state (already-replied tweet IDs, etc.)
   loadState()
 
-  // Authenticate with Twitter
+  // Authenticate via browser cookies
   try {
     await initTwitter()
   } catch (err) {
-    const msg = err.message ?? err.toString()
-    logger.error('Failed to authenticate with Twitter:', msg)
-    if (msg.includes('does not exist') || msg.includes('code":34')) {
-      logger.error('Twitter blocked the login flow. Run: npm run setup')
-      logger.error('This extracts your browser cookies to bypass the restriction.')
-    }
+    logger.error('Failed to load cookies:', err.message ?? err.toString())
+    logger.error('Run: npm run setup — then paste your auth_token and ct0 from x.com DevTools')
     process.exit(1)
   }
 
