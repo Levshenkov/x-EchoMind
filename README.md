@@ -25,32 +25,63 @@ x-EchoMind monitors top tweets on topics you define, analyzes them with AI, and 
 | 🔁 **Quote-tweet** | Adds commentary to high-engagement posts |
 | ❤️ **Like** | Auto-likes top tweets (no approval needed) |
 | ✅ **Approval gate** | Every action is shown to you before posting — approve, edit, or skip |
+| 🎭 **Tone selector** | Pick a tone per action and regenerate until you're happy — no re-runs needed |
 
 ---
 
 ## How the approval flow works
 
+Every generated tweet, reply, or quote-tweet is shown to you with a full action menu before anything is posted.
+
 ```
-────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────
   📝  NEW TWEET  topic: "AI and machine learning"
 
   Generated tweet:
-  ┌──────────────────────────────────────────────────────┐
-  │ Most AI "breakthroughs" are just scale + better     │
-  │ data. The hard problem — reasoning under            │
-  │ uncertainty — is still largely unsolved.            │
-  └──────────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────┐
+  │ Most AI "breakthroughs" are just scale + better data.   │
+  │ The hard problem — reasoning under uncertainty — is      │
+  │ still largely unsolved.                                  │
+  └──────────────────────────────────────────────────────────┘
   chars: 148/280  [████████░░░░░░░░░░░░░░░░░░░░░░]
-────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────
 ? What do you want to do?
 ❯ ✅  Approve — post as-is
   ✏️   Edit — modify before posting
+  🎭  Change tone — regenerate with a different style
   ⏭️   Skip — discard this action
 ```
 
-- **Approve** → posts immediately
-- **Edit** → pre-fills the text for you to modify, then confirms before posting
-- **Skip** → discards, moves to the next action
+| Choice | What happens |
+|---|---|
+| **Approve** | Posts immediately |
+| **Edit** | Pre-fills the text for you to modify, then confirms before posting |
+| **Change tone** | Opens the tone picker, regenerates with the new style, shows the result again |
+| **Skip** | Discards this action, moves to the next one |
+
+### 🎭 Tone selector
+
+When you pick **Change tone**, a second menu appears with 8 tones to choose from. The bot regenerates the content with that tone and shows it again — you can keep switching until you're happy.
+
+```
+? 🎭  Pick a tone:
+❯ 💡  Serious / Insightful    Write in a serious, thoughtful tone. Be precise…
+  🔧  Technical / Precise     Write in a technical, expert tone. Use accurate…
+  😄  Humorous / Joke         Write in a witty, funny tone. Be genuinely cleve…
+  😏  Sarcastic               Write with dry, sharp sarcasm. Subtle is better…
+  🔥  Contrarian / Bold       Take a strong, confident, slightly provocative s…
+  💬  Casual / Friendly       Write in a relaxed, conversational tone — like t…
+  🎓  Educational             Write in a clear, informative tone as if explain…
+  ✨  Inspirational           Write in an uplifting, motivating tone. Make the…
+```
+
+The active tone is shown as a colored tag in the header on the next preview:
+
+```
+  📝  NEW TWEET  topic: "AI and machine learning"  [😄 humorous]
+```
+
+> The `style` field in `topics.json` sets the **default** writing style for a topic. The tone picker **overrides** it for that specific generation only — your config is never changed.
 
 ---
 
@@ -164,7 +195,8 @@ x-EchoMind/
 │   ├── twitter.js     # Twitter client (search, post, reply, quote, like)
 │   ├── ai.js          # OpenAI — analyze tweets, generate content
 │   ├── bot.js         # Per-topic cycle logic
-│   ├── approver.js    # Interactive terminal approval UI
+│   ├── approver.js    # Interactive terminal approval UI (approve/edit/tone/skip)
+│   ├── tones.js       # 8 tone definitions with AI prompt instructions
 │   ├── scheduler.js   # Cron-based scheduling
 │   ├── state.js       # Persistent state (prevents duplicate actions)
 │   └── logger.js      # Winston logger (console + rolling file)
@@ -194,13 +226,17 @@ For each topic:
     │                      and the most engaging tweet
     │
     ├─ generateTweet() ──► AI writes original tweet on a subject
-    │       └─ approveAction() ─► YOU: approve / edit / skip ─► postTweet()
+    │       └─ approveAction() ─► YOU decide:
+    │               ├─ approve          ──────────────────► postTweet()
+    │               ├─ edit             ──► modify text ──► postTweet()
+    │               ├─ change tone ──► regenerate ──► show again (loop)
+    │               └─ skip             ──► discard
     │
     ├─ generateReply() ──► AI writes reply to the top tweet
-    │       └─ approveAction() ─► YOU: approve / edit / skip ─► replyToTweet()
+    │       └─ approveAction() ─► same loop ──► replyToTweet()
     │
     ├─ generateQuote() ──► AI writes quote-tweet comment
-    │       └─ approveAction() ─► YOU: approve / edit / skip ─► quoteTweet()
+    │       └─ approveAction() ─► same loop ──► quoteTweet()
     │
     └─ likeTweet() ──────► likes top N tweets (auto, no approval)
 ```
