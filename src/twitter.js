@@ -1,15 +1,21 @@
 /**
- * X (Twitter) client — direct GraphQL API with web bearer token.
- * Auth is cookie-only (auth_token + ct0).
- * Run "npm run setup" to extract cookies from your browser.
+ * X (Twitter) client.
  *
- * If API calls start returning 404, the query IDs may have rotated.
- * Update the QID constants below from X's JS bundle:
+ * SEARCH  — uses agent-twitter-client Scraper in guest mode (no cookies).
+ *           The library handles guest-token acquisition automatically.
+ *           Mobile bearer + guest token = anonymous public read access.
+ *
+ * POSTING — direct GraphQL API calls with web bearer + browser session
+ *           cookies (auth_token + ct0).  Run "npm run setup" first.
+ *
+ * If write endpoints start returning 404, the GraphQL query IDs (QID)
+ * may have rotated.  Update them from X's JS bundle:
  *   https://abs.twimg.com/responsive-web/client-web/main.*.js
  */
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { Scraper, SearchMode } from 'agent-twitter-client'
 import logger from './logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -19,11 +25,7 @@ const COOKIES_PATH = path.join(__dirname, '../data/cookies.json')
 const WEB_BEARER =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 
-// Mobile bearer — used with a guest token for anonymous public search (no cookies needed)
-const MOBILE_BEARER =
-  'AAAAAAAAAAAAAAAAAAAAAFQODgEAAAAAVHTp76lzh3GLCTQGAAAAoMkR36I%3DYIslFf9yrKWvLkasRrPYWWLPa5255nQ9s4VsVU2wOAIE5YR4Y4'
-
-// X GraphQL query IDs — rotate every few weeks, update if endpoints return 404
+// X GraphQL query IDs — rotate every few weeks, update if write endpoints return 404
 const QID = {
   UserByScreenName: 'DYkHHnsQHOuIl0gUzU5Fjg',
   UserTweets: 'rO1eqEVXEJOZkbKmVFg5IQ',
@@ -82,29 +84,15 @@ const TWEET_FEATURES = {
   responsive_web_enhance_cards_enabled: false,
 }
 
+// ── Session state (web bearer) ────────────────────────────────────────────────
 let authToken = null
 let ct0 = null
 
-// Guest token cache (for anonymous search — expires ~15 min, we refresh every 12)
-let _guestToken = null
-let _guestTokenExpiry = 0
-
-async function getGuestToken() {
-  if (_guestToken && Date.now() < _guestTokenExpiry) return _guestToken
-
-  const res = await fetch('https://api.twitter.com/1.1/guest/activate.json', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${MOBILE_BEARER}` },
-  })
-  if (!res.ok) throw new Error(`guest/activate.json returned ${res.status}`)
-
-  const data = await res.json()
-  if (!data.guest_token) throw new Error('guest/activate.json: no guest_token in response')
-
-  _guestToken = data.guest_token
-  _guestTokenExpiry = Date.now() + 12 * 60 * 1000
-  logger.info('Twitter: guest token refreshed')
-  return _guestToken
+// ── Guest scraper (no cookies — for anonymous search only) ───────────────────
+let _guestScraper = null
+function guestScraper() {
+  if (!_guestScraper) _guestScraper = new Scraper()
+  return _guestScraper
 }
 
 function buildHeaders() {
@@ -136,57 +124,6 @@ async function xFetch(url, options = {}) {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
- * Uses mobile bearer + guest token for anonymous read access — no session needed.
- * @param {string} query
- * @param {number} count
- * @returns {Promise<Tweet[]>}
- */
-export async function searchTweets(query, count = 20) {
-  try {
-    const guestToken = await getGuestToken()
-
-    const params = new URLSearchParams({
-      q: query,
-      count: String(Math.min(count, 100)),
-      tweet_mode: 'extended',
-      query_source: 'typed_query',
-      include_quote_count: 'true',
-      include_reply_count: '1',
-      include_ext_alt_text: 'true',
-      include_entities: 'true',
-      include_user_entities: 'true',
-    })
-
-    const res = await fetch(
-      `https://api.twitter.com/2/search/adaptive.json?${params}`,
-      {
-        headers: {
-          authorization: `Bearer ${MOBILE_BEARER}`,
-          'x-guest-token': guestToken,
-          'content-type': 'application/json',
-          'user-agent': 'TwitterAndroid/10.21.0-release.0',
-          'x-twitter-client-language': 'en',
-        },
-      }
-    )
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`${res.status} ${res.statusText}: ${body.slice(0, 200)}`)
-    }
-
-    const data = await res.json()
-    const tweets = parseAdaptiveSearch(data, count)
-    logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
-    return tweets
-  } catch (err) {
-    logger.error(`Twitter: searchTweets failed for "${query}":`, err?.message ?? String(err))
-    return []
-  }
-}
-
 export async function initTwitter() {
   if (!fs.existsSync(COOKIES_PATH)) {
     throw new Error('No cookies found. Run: npm run setup')
@@ -203,6 +140,30 @@ export async function initTwitter() {
   }
 
   logger.info('Twitter: cookies loaded')
+}
+
+/**
+ * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
+ * Uses agent-twitter-client guest scraper — handles mobile bearer + guest token
+ * automatically, no session cookies involved.
+ * @param {string} query
+ * @param {number} count
+ * @returns {Promise<object[]>}
+ */
+export async function searchTweets(query, count = 20) {
+  const tweets = []
+  try {
+    const scraper = guestScraper()
+    for await (const raw of scraper.searchTweets(query, count, SearchMode.Top)) {
+      if (tweets.length >= count) break
+      const t = normalizeTweetFromLibrary(raw)
+      if (t) tweets.push(t)
+    }
+    logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
+  } catch (err) {
+    logger.error(`Twitter: search "${query}" failed: ${err?.message || String(err)}`)
+  }
+  return tweets
 }
 
 /**
@@ -235,7 +196,7 @@ export async function getUserId(screenName) {
     const data = await xFetch(url)
     return data?.data?.user?.result?.rest_id ?? null
   } catch (err) {
-    logger.error(`Twitter: getUserId failed for @${screenName}:`, err?.message ?? String(err))
+    logger.error(`Twitter: getUserId @${screenName} failed: ${err?.message || String(err)}`)
     return null
   }
 }
@@ -244,7 +205,7 @@ export async function getUserId(screenName) {
  * Fetch recent tweets from a specific account's timeline.
  * @param {string} username  - X screen name without @
  * @param {number} count
- * @returns {Promise<Tweet[]>}
+ * @returns {Promise<object[]>}
  */
 export async function getAccountTweets(username, count = 20) {
   try {
@@ -276,7 +237,7 @@ export async function getAccountTweets(username, count = 20) {
     logger.info(`Twitter: fetched ${tweets.length} tweets from @${username}`)
     return tweets
   } catch (err) {
-    logger.error(`Twitter: getAccountTweets failed for @${username}:`, err?.message ?? String(err))
+    logger.error(`Twitter: getAccountTweets @${username} failed: ${err?.message || String(err)}`)
     return []
   }
 }
@@ -284,7 +245,7 @@ export async function getAccountTweets(username, count = 20) {
 /**
  * Get the home timeline (tweets from followed accounts).
  * @param {number} count
- * @returns {Promise<Tweet[]>}
+ * @returns {Promise<object[]>}
  */
 export async function getTimeline(count = 20) {
   try {
@@ -299,7 +260,7 @@ export async function getTimeline(count = 20) {
     const instructions = data?.data?.home?.home_timeline_urt?.instructions ?? []
     return extractTweets(instructions)
   } catch (err) {
-    logger.error('Twitter: getTimeline failed:', err?.message ?? String(err))
+    logger.error(`Twitter: getTimeline failed: ${err?.message || String(err)}`)
     return []
   }
 }
@@ -364,7 +325,7 @@ export async function replyToTweet(text, tweetId) {
  * Quote-tweet (retweet with comment).
  * @param {string} text
  * @param {string} tweetId
- * @param {string} [authorUsername]  - needed for the attachment URL
+ * @param {string} [authorUsername]
  * @returns {Promise<Tweet|null>}
  */
 export async function quoteTweet(text, tweetId, authorUsername) {
@@ -412,35 +373,26 @@ export async function likeTweet(tweetId) {
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
 /**
- * Parse adaptive.json response (legacy REST search format).
- * globalObjects.tweets is a flat map of id → tweet, globalObjects.users is id → user.
+ * Normalize a tweet from agent-twitter-client's format to our internal shape.
  */
-function parseAdaptiveSearch(data, limit) {
-  const tweetMap = data?.globalObjects?.tweets ?? {}
-  const userMap = data?.globalObjects?.users ?? {}
-
-  return Object.entries(tweetMap)
-    .map(([id, t]) => {
-      const user = userMap[t.user_id_str] ?? {}
-      return {
-        id: t.id_str ?? id,
-        text: t.full_text ?? t.text ?? '',
-        author: user.screen_name ?? 'unknown',
-        authorName: user.name ?? '',
-        likes: t.favorite_count ?? 0,
-        retweets: t.retweet_count ?? 0,
-        replies: t.reply_count ?? 0,
-        views: parseInt(t.ext?.views?.count ?? '0', 10),
-        createdAt: t.created_at ? new Date(t.created_at) : null,
-        url: `https://x.com/${user.screen_name}/status/${t.id_str ?? id}`,
-        isReply: !!t.in_reply_to_status_id_str,
-        isRetweet: !!t.retweeted_status_id_str,
-        hashtags: t.entities?.hashtags?.map(h => h.text) ?? [],
-        mentions: t.entities?.user_mentions?.map(m => m.screen_name) ?? [],
-      }
-    })
-    .filter(t => !t.isRetweet)
-    .slice(0, limit)
+function normalizeTweetFromLibrary(raw) {
+  if (!raw?.id) return null
+  return {
+    id: raw.id,
+    text: raw.text ?? raw.fullText ?? '',
+    author: raw.username ?? 'unknown',
+    authorName: raw.name ?? '',
+    likes: raw.likes ?? raw.favoriteCount ?? 0,
+    retweets: raw.retweets ?? raw.retweetCount ?? 0,
+    replies: raw.replies ?? raw.replyCount ?? 0,
+    views: raw.views ?? raw.viewCount ?? 0,
+    createdAt: raw.timeParsed ?? null,
+    url: `https://x.com/${raw.username}/status/${raw.id}`,
+    isReply: !!(raw.inReplyToStatusId || raw.isReply),
+    isRetweet: !!raw.isRetweet,
+    hashtags: raw.hashtags ?? [],
+    mentions: (raw.mentions ?? []).map(m => (typeof m === 'string' ? m : m.username ?? m.screen_name ?? '')),
+  }
 }
 
 function extractTweets(instructions, fallbackUsername) {
@@ -472,7 +424,6 @@ function parseTweetResult(result, fallbackUsername) {
   if (!result) return null
   if (result.__typename === 'TweetTombstone') return null
 
-  // Some entries wrap the tweet one level deeper
   const tweetData = result.tweet ?? result
   const legacy = tweetData.legacy
   if (!legacy) return null
