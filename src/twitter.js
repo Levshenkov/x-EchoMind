@@ -15,7 +15,6 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { Scraper, SearchMode } from 'agent-twitter-client'
 import logger from './logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -84,16 +83,9 @@ const TWEET_FEATURES = {
   responsive_web_enhance_cards_enabled: false,
 }
 
-// ── Session state (web bearer) ────────────────────────────────────────────────
+// ── Session state ─────────────────────────────────────────────────────────────
 let authToken = null
 let ct0 = null
-
-// ── Guest scraper (no cookies — for anonymous search only) ───────────────────
-let _guestScraper = null
-function guestScraper() {
-  if (!_guestScraper) _guestScraper = new Scraper()
-  return _guestScraper
-}
 
 function buildHeaders() {
   return {
@@ -144,26 +136,32 @@ export async function initTwitter() {
 
 /**
  * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
- * Uses agent-twitter-client guest scraper — handles mobile bearer + guest token
- * automatically, no session cookies involved.
+ * Uses the authenticated adaptive.json REST endpoint via our web session.
  * @param {string} query
  * @param {number} count
  * @returns {Promise<object[]>}
  */
 export async function searchTweets(query, count = 20) {
-  const tweets = []
   try {
-    const scraper = guestScraper()
-    for await (const raw of scraper.searchTweets(query, count, SearchMode.Top)) {
-      if (tweets.length >= count) break
-      const t = normalizeTweetFromLibrary(raw)
-      if (t) tweets.push(t)
-    }
+    const params = new URLSearchParams({
+      q: query,
+      count: String(Math.min(count, 100)),
+      tweet_mode: 'extended',
+      query_source: 'typed_query',
+      include_quote_count: 'true',
+      include_reply_count: '1',
+      include_ext_views: 'true',
+      include_entities: 'true',
+    })
+
+    const data = await xFetch(`https://x.com/i/api/2/search/adaptive.json?${params}`)
+    const tweets = parseAdaptiveSearch(data, count)
     logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
+    return tweets
   } catch (err) {
     logger.error(`Twitter: search "${query}" failed: ${err?.message || String(err)}`)
+    return []
   }
-  return tweets
 }
 
 /**
@@ -373,26 +371,36 @@ export async function likeTweet(tweetId) {
 // ─── Parsing helpers ──────────────────────────────────────────────────────────
 
 /**
- * Normalize a tweet from agent-twitter-client's format to our internal shape.
+ * Parse adaptive.json response.
+ * globalObjects.tweets = flat map of id → tweet
+ * globalObjects.users  = flat map of id → user
  */
-function normalizeTweetFromLibrary(raw) {
-  if (!raw?.id) return null
-  return {
-    id: raw.id,
-    text: raw.text ?? raw.fullText ?? '',
-    author: raw.username ?? 'unknown',
-    authorName: raw.name ?? '',
-    likes: raw.likes ?? raw.favoriteCount ?? 0,
-    retweets: raw.retweets ?? raw.retweetCount ?? 0,
-    replies: raw.replies ?? raw.replyCount ?? 0,
-    views: raw.views ?? raw.viewCount ?? 0,
-    createdAt: raw.timeParsed ?? null,
-    url: `https://x.com/${raw.username}/status/${raw.id}`,
-    isReply: !!(raw.inReplyToStatusId || raw.isReply),
-    isRetweet: !!raw.isRetweet,
-    hashtags: raw.hashtags ?? [],
-    mentions: (raw.mentions ?? []).map(m => (typeof m === 'string' ? m : m.username ?? m.screen_name ?? '')),
-  }
+function parseAdaptiveSearch(data, limit) {
+  const tweetMap = data?.globalObjects?.tweets ?? {}
+  const userMap = data?.globalObjects?.users ?? {}
+
+  return Object.entries(tweetMap)
+    .map(([id, t]) => {
+      const user = userMap[t.user_id_str] ?? {}
+      return {
+        id: t.id_str ?? id,
+        text: t.full_text ?? t.text ?? '',
+        author: user.screen_name ?? 'unknown',
+        authorName: user.name ?? '',
+        likes: t.favorite_count ?? 0,
+        retweets: t.retweet_count ?? 0,
+        replies: t.reply_count ?? 0,
+        views: parseInt(t.ext?.views?.count ?? '0', 10),
+        createdAt: t.created_at ? new Date(t.created_at) : null,
+        url: `https://x.com/${user.screen_name}/status/${t.id_str ?? id}`,
+        isReply: !!t.in_reply_to_status_id_str,
+        isRetweet: !!t.retweeted_status_id_str,
+        hashtags: t.entities?.hashtags?.map(h => h.text) ?? [],
+        mentions: t.entities?.user_mentions?.map(m => m.screen_name) ?? [],
+      }
+    })
+    .filter(t => !t.isRetweet)
+    .slice(0, limit)
 }
 
 function extractTweets(instructions, fallbackUsername) {
