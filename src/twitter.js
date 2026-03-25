@@ -25,11 +25,13 @@ const WEB_BEARER =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 
 // X GraphQL query IDs — rotate every few weeks, update if write endpoints return 404
+// Updated: 2026-03-25 from https://abs.twimg.com/responsive-web/client-web/main.*.js
 const QID = {
-  UserByScreenName: 'DYkHHnsQHOuIl0gUzU5Fjg',
-  UserTweets: 'rO1eqEVXEJOZkbKmVFg5IQ',
-  HomeTimeline: 'MpnCeE0hy8m5eWobPx8euw',
-  CreateTweet: 'Ke9I4_p5rCzwhTzK1fV2_w',
+  SearchTimeline: 'GcXk9vN_d1jUfHNqLacXQA',
+  UserByScreenName: 'IGgvgiOx4QZndDHuD3x9TQ',
+  UserTweets: 'FOlovQsiHGDls3c0Q_HaSQ',
+  HomeTimeline: 'xhYBF94fPSp8ey64FfYXiA',
+  CreateTweet: 'lvs5-tN_lLNg_PhdRSURMg',
   FavoriteTweet: 'lI07N6Otwv1PhnEgXILM7A',
   CreateRetweet: 'mbRO74GrOvSfRcJnlMapnQ',
 }
@@ -136,26 +138,32 @@ export async function initTwitter() {
 
 /**
  * Search for tweets by keyword, hashtag, or cashtag (e.g. $BTC, #AI, "OpenAI").
- * Uses the authenticated adaptive.json REST endpoint via our web session.
+ * Uses the GraphQL SearchTimeline endpoint via POST.
  * @param {string} query
  * @param {number} count
  * @returns {Promise<object[]>}
  */
 export async function searchTweets(query, count = 20) {
   try {
-    const params = new URLSearchParams({
-      q: query,
-      count: String(Math.min(count, 100)),
-      tweet_mode: 'extended',
-      query_source: 'typed_query',
-      include_quote_count: 'true',
-      include_reply_count: '1',
-      include_ext_views: 'true',
-      include_entities: 'true',
-    })
+    const body = {
+      variables: {
+        rawQuery: query,
+        count: Math.min(count, 50),
+        querySource: 'typed_query',
+        product: 'Top',
+      },
+      features: TIMELINE_FEATURES,
+      queryId: QID.SearchTimeline,
+    }
 
-    const data = await xFetch(`https://x.com/i/api/2/search/adaptive.json?${params}`)
-    const tweets = parseAdaptiveSearch(data, count)
+    const data = await xFetch(
+      `https://x.com/i/api/graphql/${QID.SearchTimeline}/SearchTimeline`,
+      { method: 'POST', body: JSON.stringify(body) }
+    )
+
+    const instructions =
+      data?.data?.search_by_raw_query?.search_timeline?.timeline?.instructions ?? []
+    const tweets = extractTweets(instructions)
     logger.info(`Twitter: search "${query}" → ${tweets.length} tweets`)
     return tweets
   } catch (err) {
@@ -436,14 +444,17 @@ function parseTweetResult(result, fallbackUsername) {
   const legacy = tweetData.legacy
   if (!legacy) return null
 
-  const userLegacy = tweetData.core?.user_results?.result?.legacy ?? {}
-  const author = userLegacy.screen_name ?? fallbackUsername ?? 'unknown'
+  const userResult = tweetData.core?.user_results?.result ?? {}
+  const userCore = userResult.core ?? {}
+  const userLegacy = userResult.legacy ?? {}
+  const author = userCore.screen_name ?? userLegacy.screen_name ?? fallbackUsername ?? 'unknown'
+  const authorName = userCore.name ?? userLegacy.name ?? ''
 
   return {
     id: tweetData.rest_id,
     text: legacy.full_text,
     author,
-    authorName: userLegacy.name ?? '',
+    authorName,
     likes: legacy.favorite_count ?? 0,
     retweets: legacy.retweet_count ?? 0,
     replies: legacy.reply_count ?? 0,
