@@ -1,40 +1,33 @@
 [
   {
-    "name": "AI and machine learning",
+    "name": "AI research and agents",
     "enabled": true,
     "accounts": ["karpathy", "sama", "ylecun", "AnthropicAI", "GoogleDeepMind", "GaryMarcus", "emollick", "DrJimFan"],
     "subjects": [
-      "The biggest misconception people have about AI right now",
-      "What most people miss about the current AI revolution",
-      "Why AI safety matters more than AI capabilities in 2026",
-      "The difference between AI hype and AI reality"
+      "Where current agent harnesses break down in practice",
+      "The gap between benchmark performance and real deployment",
+      "What 'agent' actually means once you strip the marketing",
+      "Why post-training infrastructure is the real moat, not weights",
+      "How to read AI capability claims without getting fooled",
+      "The mechanism that makes scaling laws still hold (or finally not)",
+      "Open-weights vs closed-weights: what the gap actually consists of"
     ],
-    "style": "Thoughtful, slightly contrarian, backed by reasoning. Confident but not arrogant.",
-    "avoid": ["crypto", "blockchain", "NFT"]
+    "style": "Cite specifics. Concrete over abstract.",
+    "avoid": ["price", "token launches", "shilling", "investment advice"]
   },
   {
-    "name": "Software engineering",
+    "name": "Crypto x AI intersection",
     "enabled": true,
-    "accounts": ["dhh", "kelseyhightower", "martinfowler", "jessitron", "GeePaw", "sarahmei", "unclebobmartin"],
+    "searchQueries": ["ZKML", "verifiable compute", "decentralized inference", "agent economy", "on-chain ML", "AI x crypto"],
     "subjects": [
-      "What makes a senior engineer different from a junior one",
-      "The most underrated skill in software development",
-      "Why most software projects fail (and how to prevent it)",
-      "What I wish I knew earlier about writing clean code"
+      "What ZKML actually solves and what it doesn't",
+      "Why decentralized inference economics are upside-down for most workloads",
+      "Agent economies vs agent tokens — what's the real problem statement",
+      "The AI-crypto thesis that routes around Nvidia margin doesn't exist yet",
+      "Where verifiable compute is a real product and where it's a slide deck",
+      "What 'autonomous agent on-chain' has to solve before it's interesting"
     ],
-    "style": "Practical, opinionated, from a seasoned engineer's perspective. Direct and no-fluff.",
-    "avoid": []
-  },
-  {
-    "name": "Tech startups",
-    "enabled": false,
-    "accounts": ["paulg", "naval", "Jason", "andrewchen", "benedictevans", "stratechery"],
-    "subjects": [
-      "What VCs don't tell you about fundraising",
-      "The startup advice that's actually wrong",
-      "Why most startup founders focus on the wrong metrics"
-    ],
-    "style": "Candid, insider perspective. Challenges conventional startup wisdom.",
-    "avoid": ["specific company names", "politics"]
+    "style": "Mechanism-first. If a claim has no mechanism, name that.",
+    "avoid": ["specific token tickers", "price predictions", "trading"]
   }
 ]

@@ -3,6 +3,7 @@
  */
 import OpenAI from 'openai'
 import { toneInstruction } from './tones.js'
+import { personaPrompt } from './persona.js'
 import logger from './logger.js'
 
 let client = null
@@ -18,6 +19,18 @@ function getClient() {
 }
 
 const MODEL = 'gpt-4o-mini'
+
+/**
+ * Build a "your recent posts" block for the user prompt.
+ * Used to give the persona voice continuity — don't repeat, don't contradict.
+ */
+function recentPostsBlock(recentPosts) {
+  if (!recentPosts?.length) return ''
+  const lines = recentPosts
+    .map((p, i) => `${i + 1}. [${p.type}] ${p.text}`)
+    .join('\n')
+  return `\n\nYour recent posts (newest first). Do not repeat ideas or phrasings verbatim. You may build on or refine these views, but stay consistent with the through-line:\n${lines}`
+}
 
 /**
  * Analyze a batch of tweets and return structured insights.
@@ -72,19 +85,21 @@ Respond with valid JSON in this exact shape:
 
 /**
  * Generate an original tweet on a subject.
- * @param {string}   subject  - The topic/subject to tweet about
- * @param {string[]} themes   - Current trending themes (from recent analysis)
- * @param {string}   style    - Base writing style from config
- * @param {string[]} avoid    - Topics/phrases to avoid
- * @param {string}   [tone]   - Tone override (from tones.js) — takes priority over style
+ * @param {string}   subject       - The topic/subject to tweet about
+ * @param {string[]} themes        - Current trending themes (from recent analysis)
+ * @param {string}   style         - Base writing style from config
+ * @param {string[]} avoid         - Topics/phrases to avoid
+ * @param {string}   [tone]        - Tone override (from tones.js) — takes priority over style
+ * @param {object[]} [recentPosts] - Recent own posts for voice continuity
  */
-export async function generateTweet(subject, themes = [], style = '', avoid = [], tone = null) {
+export async function generateTweet(subject, themes = [], style = '', avoid = [], tone = null, recentPosts = []) {
   const themeContext = themes.length ? `\nTrending themes right now: ${themes.join(', ')}` : ''
   const avoidNote   = avoid.length  ? `\nDo NOT mention or reference: ${avoid.join(', ')}` : ''
   const styleNote   = !tone && style ? `\nWriting style: ${style}` : ''
   const toneNote    = toneInstruction(tone)
+  const recentNote  = recentPostsBlock(recentPosts)
 
-  const prompt = `Write a single original tweet about: "${subject}"${themeContext}${styleNote}${toneNote}${avoidNote}
+  const prompt = `Write a single original tweet about: "${subject}"${themeContext}${styleNote}${toneNote}${avoidNote}${recentNote}
 
 Rules:
 - Max 280 characters
@@ -97,7 +112,10 @@ Rules:
   try {
     const res = await getClient().chat.completions.create({
       model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: personaPrompt() },
+        { role: 'user', content: prompt },
+      ],
       temperature: 0.85,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')
@@ -111,19 +129,21 @@ Rules:
 
 /**
  * Generate a reply to a tweet.
- * @param {object} tweet  - The tweet to reply to
- * @param {string} topic  - Context topic
- * @param {string} style  - Base writing style
- * @param {string} [tone] - Tone override
+ * @param {object}   tweet         - The tweet to reply to
+ * @param {string}   topic         - Context topic
+ * @param {string}   style         - Base writing style
+ * @param {string}   [tone]        - Tone override
+ * @param {object[]} [recentPosts] - Recent own posts for voice continuity
  */
-export async function generateReply(tweet, topic, style = '', tone = null) {
+export async function generateReply(tweet, topic, style = '', tone = null, recentPosts = []) {
   const styleNote = !tone && style ? `\nWriting style: ${style}` : ''
   const toneNote  = toneInstruction(tone)
+  const recentNote = recentPostsBlock(recentPosts)
 
   const prompt = `You are replying to this tweet by @${tweet.author}:
 "${tweet.text}"
 
-Topic context: ${topic}${styleNote}${toneNote}
+Topic context: ${topic}${styleNote}${toneNote}${recentNote}
 
 Write a reply that:
 - Directly engages with what they said
@@ -135,7 +155,10 @@ Write a reply that:
   try {
     const res = await getClient().chat.completions.create({
       model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: personaPrompt() },
+        { role: 'user', content: prompt },
+      ],
       temperature: 0.8,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')
@@ -149,19 +172,21 @@ Write a reply that:
 
 /**
  * Generate a quote-tweet comment.
- * @param {object} tweet  - The tweet to quote
- * @param {string} topic  - Context topic
- * @param {string} style  - Base writing style
- * @param {string} [tone] - Tone override
+ * @param {object}   tweet         - The tweet to quote
+ * @param {string}   topic         - Context topic
+ * @param {string}   style         - Base writing style
+ * @param {string}   [tone]        - Tone override
+ * @param {object[]} [recentPosts] - Recent own posts for voice continuity
  */
-export async function generateQuoteComment(tweet, topic, style = '', tone = null) {
+export async function generateQuoteComment(tweet, topic, style = '', tone = null, recentPosts = []) {
   const styleNote = !tone && style ? `\nWriting style: ${style}` : ''
   const toneNote  = toneInstruction(tone)
+  const recentNote = recentPostsBlock(recentPosts)
 
   const prompt = `You are quote-tweeting this post by @${tweet.author}:
 "${tweet.text}"
 
-Topic context: ${topic}${styleNote}${toneNote}
+Topic context: ${topic}${styleNote}${toneNote}${recentNote}
 
 Write a quote-tweet comment that:
 - Adds your perspective or expands on their point
@@ -172,7 +197,10 @@ Write a quote-tweet comment that:
   try {
     const res = await getClient().chat.completions.create({
       model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: personaPrompt() },
+        { role: 'user', content: prompt },
+      ],
       temperature: 0.8,
     })
     const text = res.choices[0].message.content.trim().replace(/^["']|["']$/g, '')

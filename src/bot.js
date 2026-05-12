@@ -3,10 +3,15 @@
  * Every generated action goes through approveAction().
  * If the user picks "Change tone", we regenerate and show again.
  */
-import { searchTweets, getAccountTweets, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
+import { searchTweets, getAccountTweets, getMentions, postTweet, replyToTweet, quoteTweet, likeTweet } from './twitter.js'
 import { analyzeTweets, generateTweet, generateReply, generateQuoteComment } from './ai.js'
 import { approveAction } from './approver.js'
-import { hasRepliedTo, hasQuoted, markReplied, markQuoted, markPosted } from './state.js'
+import {
+  hasRepliedTo, hasQuoted,
+  markReplied, markQuoted, markPosted,
+  recordPost, getRecentPosts,
+  getLastMentionId, setLastMentionId,
+} from './state.js'
 import logger from './logger.js'
 
 export async function runTopicCycle(topic, settings) {
@@ -48,7 +53,8 @@ export async function runTopicCycle(topic, settings) {
     logger.info(`Bot: generating tweet — "${subject}"`)
 
     let tone = null
-    let text = await generateTweet(subject, analysis.themes, style, topic.avoid, tone)
+    let recent = getRecentPosts(15)
+    let text = await generateTweet(subject, analysis.themes, style, topic.avoid, tone, recent)
 
     if (text) {
       let result
@@ -56,7 +62,7 @@ export async function runTopicCycle(topic, settings) {
         result = await approveAction({ type: 'tweet', text, topic: topic.name, tone })
         if (result.action === 'regenerate') {
           tone = result.tone
-          text = await generateTweet(subject, analysis.themes, style, topic.avoid, tone)
+          text = await generateTweet(subject, analysis.themes, style, topic.avoid, tone, recent)
           if (!text) { result = { action: 'skip', text: '' }; break }
         }
       } while (result.action === 'regenerate')
@@ -65,6 +71,7 @@ export async function runTopicCycle(topic, settings) {
         try {
           const res = await postTweet(result.text)
           if (res?.id) markPosted(res.id)
+          recordPost({ text: result.text, type: 'original' })
           logger.info('Bot: original tweet posted')
           await sleep(settings.delayBetweenActions ?? 5000)
         } catch (err) { logger.error('Bot: post failed:', err.message) }
@@ -82,7 +89,8 @@ export async function runTopicCycle(topic, settings) {
       logger.info(`Bot: generating reply to @${target.author}`)
 
       let tone = null
-      let text = await generateReply(target, topic.name, style, tone)
+      let recent = getRecentPosts(15)
+      let text = await generateReply(target, topic.name, style, tone, recent)
 
       if (text) {
         let result
@@ -90,7 +98,7 @@ export async function runTopicCycle(topic, settings) {
           result = await approveAction({ type: 'reply', text, targetTweet: target, topic: topic.name, tone })
           if (result.action === 'regenerate') {
             tone = result.tone
-            text = await generateReply(target, topic.name, style, tone)
+            text = await generateReply(target, topic.name, style, tone, recent)
             if (!text) { result = { action: 'skip', text: '' }; break }
           }
         } while (result.action === 'regenerate')
@@ -115,7 +123,8 @@ export async function runTopicCycle(topic, settings) {
       logger.info(`Bot: generating quote for @${candidate.author}`)
 
       let tone = null
-      let text = await generateQuoteComment(candidate, topic.name, style, tone)
+      let recent = getRecentPosts(15)
+      let text = await generateQuoteComment(candidate, topic.name, style, tone, recent)
 
       if (text) {
         let result
@@ -123,7 +132,7 @@ export async function runTopicCycle(topic, settings) {
           result = await approveAction({ type: 'quote', text, targetTweet: candidate, topic: topic.name, tone })
           if (result.action === 'regenerate') {
             tone = result.tone
-            text = await generateQuoteComment(candidate, topic.name, style, tone)
+            text = await generateQuoteComment(candidate, topic.name, style, tone, recent)
             if (!text) { result = { action: 'skip', text: '' }; break }
           }
         } while (result.action === 'regenerate')
@@ -132,6 +141,7 @@ export async function runTopicCycle(topic, settings) {
           try {
             await quoteTweet(result.text, candidate.id, candidate.author)
             markQuoted(candidate.id)
+            recordPost({ text: result.text, type: 'quote' })
             logger.info(`Bot: quote-tweeted @${candidate.author}`)
             await sleep(settings.delayBetweenActions ?? 5000)
           } catch (err) { logger.error('Bot: quote-tweet failed:', err.message) }
@@ -168,6 +178,73 @@ export async function runSearchCycle(query, settings) {
     avoid: [],
   }
   return runTopicCycle(topic, settings)
+}
+
+/**
+ * Inbound cycle — fetch mentions newer than the saved cursor,
+ * generate a reply for each, run through the same approval gate.
+ *
+ * @param {object} args
+ * @param {string} args.handle   - Bot's X handle (no @)
+ * @param {object} args.settings - Bot settings (uses delayBetweenActions, defaultStyle)
+ */
+export async function runInboundCycle({ handle, settings }) {
+  if (!handle) { logger.error('Inbound: missing handle'); return }
+
+  logger.info(`Inbound: checking mentions for @${handle}`)
+  const sinceId = getLastMentionId()
+  const mentions = await getMentions(handle, sinceId, settings.mentionsPerCycle ?? 30)
+
+  if (!mentions.length) {
+    logger.info('Inbound: no new mentions')
+    return
+  }
+  logger.info(`Inbound: ${mentions.length} new mention(s)`)
+
+  // Advance the cursor up front to the newest ID we saw. Even if the user
+  // skips every reply, we still don't want to re-surface the same batch.
+  setLastMentionId(mentions[0].id)
+
+  const candidates = mentions.filter(t => !hasRepliedTo(t.id))
+  if (!candidates.length) {
+    logger.info('Inbound: all new mentions already handled')
+    return
+  }
+
+  const style = settings.defaultStyle ?? ''
+  const topicHint = 'Replying to a mention or reply on X'
+
+  for (const target of candidates) {
+    logger.info(`Inbound: generating reply to @${target.author} (${target.id})`)
+
+    let tone = null
+    let recent = getRecentPosts(15)
+    let text = await generateReply(target, topicHint, style, tone, recent)
+    if (!text) continue
+
+    let result
+    do {
+      result = await approveAction({ type: 'reply', text, targetTweet: target, topic: topicHint, tone })
+      if (result.action === 'regenerate') {
+        tone = result.tone
+        text = await generateReply(target, topicHint, style, tone, recent)
+        if (!text) { result = { action: 'skip', text: '' }; break }
+      }
+    } while (result.action === 'regenerate')
+
+    if (result.action === 'post') {
+      try {
+        await replyToTweet(result.text, target.id)
+        markReplied(target.id)
+        logger.info(`Inbound: replied to @${target.author}`)
+        await sleep(settings.delayBetweenActions ?? 5000)
+      } catch (err) {
+        logger.error('Inbound: reply failed:', err.message)
+      }
+    }
+  }
+
+  logger.info('Inbound: cycle complete')
 }
 
 function engagementScore(t) {

@@ -173,6 +173,43 @@ export async function searchTweets(query, count = 20) {
 }
 
 /**
+ * Fetch mentions of a handle (and replies to its tweets) newer than sinceId.
+ * Implemented on top of SearchTimeline (`@handle` search) to avoid depending
+ * on a separate NotificationsTimeline QID that rotates independently.
+ *
+ * Search results aren't strictly chronological, so we sort by tweet ID desc
+ * (X IDs are monotonically increasing) and filter against sinceId.
+ *
+ * @param {string}  handle             - Bot's screen name, without @
+ * @param {string?} sinceId            - Only return tweets with id > sinceId (null = no floor)
+ * @param {number}  count              - Max raw results to fetch
+ * @returns {Promise<object[]>} mentions sorted newest first, excluding self-authored
+ */
+export async function getMentions(handle, sinceId = null, count = 30) {
+  if (!handle) {
+    logger.error('Twitter: getMentions called without a handle')
+    return []
+  }
+
+  const tweets = await searchTweets(`@${handle}`, count)
+
+  const filtered = tweets
+    .filter(t => t.author?.toLowerCase() !== handle.toLowerCase())
+    .filter(t => !t.isRetweet)
+    .sort((a, b) => {
+      try { return BigInt(b.id) > BigInt(a.id) ? 1 : -1 } catch { return 0 }
+    })
+
+  if (!sinceId) return filtered
+  try {
+    const floor = BigInt(sinceId)
+    return filtered.filter(t => { try { return BigInt(t.id) > floor } catch { return false } })
+  } catch {
+    return filtered
+  }
+}
+
+/**
  * Resolve a screen name to a numeric user ID.
  * @param {string} screenName
  * @returns {Promise<string|null>}

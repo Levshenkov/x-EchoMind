@@ -1,8 +1,8 @@
 {
   "_comment": "Bot-wide settings. Edit topics.json to configure per-topic behavior.",
 
-  "schedule": "0 */3 * * *",
-  "_scheduleNote": "Cron expression — runs every 3 hours. See https://crontab.guru for help.",
+  "schedule": "0 8,18 * * *",
+  "_scheduleNote": "Twice a day at 08:00 and 18:00 local time. 08:00 catches EU morning; 18:00 catches US morning + EU evening — the strongest engagement windows for tech X. Matches the persona's 'posts rarely' framing. See https://crontab.guru.",
 
   "runOnStart": true,
   "_runOnStartNote": "Run a cycle immediately when the bot starts (before the first cron tick).",
